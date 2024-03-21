@@ -1,4 +1,3 @@
-import { kv } from '@vercel/kv'
 import { OpenAIStream, StreamingTextResponse } from 'ai'
 import { Configuration, OpenAIApi } from 'openai-edge'
 
@@ -16,7 +15,9 @@ const openai = new OpenAIApi(configuration)
 export async function POST(req: Request) {
   const json = await req.json()
   const { messages, previewToken } = json
-  const userId = (await auth())?.user.id
+  const authUser = await auth()
+  const userId = authUser?.user.email
+
 
   if (!userId) {
     return new Response('Unauthorized', {
@@ -28,12 +29,24 @@ export async function POST(req: Request) {
     configuration.apiKey = previewToken
   }
 
-  const res = await openai.createChatCompletion({
-    model: 'gpt-3.5-turbo',
-    messages,
+  console.log('messages:', messages)
+
+  const res = await openai.createCompletion({
+    model: 'text-davinci-003',
     temperature: 0.7,
-    stream: true
+    stream: true,
+    max_tokens: 1000,
+    prompt: `Answer questions according to property investment.
+ 
+Question: What's BRRRR
+Answer: The BRRRR strategy is Buy, Rehab, Rent, Refinance, Repeat.
+Question: What's pros of BRRRR
+Answer: A few pros of the BRRRR Method include your ability to make a passive income, increase your rental portfolio, and build equity during the rehab process.
+Question: ${messages[messages.length-1].content}
+Answer:
+`,
   })
+
 
   const stream = OpenAIStream(res, {
     async onCompletion(completion) {
@@ -55,11 +68,6 @@ export async function POST(req: Request) {
           }
         ]
       }
-      await kv.hmset(`chat:${id}`, payload)
-      await kv.zadd(`user:chat:${userId}`, {
-        score: createdAt,
-        member: `chat:${id}`
-      })
     }
   })
 
