@@ -49,7 +49,8 @@ export async function removeChat({ id, path }: { id: string; path: string }) {
     }
   }
 
-  const uid = await kv.hget<string>(`chat:${id}`, 'userId')
+  //Convert uid to string for consistent comparison with session.user.id
+  const uid = String(await kv.hget(`chat:${id}`, 'userId'))
 
   if (uid !== session?.user?.id) {
     return {
@@ -75,7 +76,7 @@ export async function clearChats() {
 
   const chats: string[] = await kv.zrange(`user:chat:${session.user.id}`, 0, -1)
   if (!chats.length) {
-  return redirect('/')
+    return redirect('/')
   }
   const pipeline = kv.pipeline()
 
@@ -100,12 +101,20 @@ export async function getSharedChat(id: string) {
   return chat
 }
 
-export async function shareChat(chat: Chat) {
+export async function shareChat(id: string) {
   const session = await auth()
 
-  if (!session?.user?.id || session.user.id !== chat.userId) {
+  if (!session?.user?.id) {
     return {
       error: 'Unauthorized'
+    }
+  }
+
+  const chat = await kv.hgetall<Chat>(`chat:${id}`)
+
+  if (!chat || chat.userId !== session.user.id) {
+    return {
+      error: 'Something went wrong'
     }
   }
 
@@ -117,4 +126,31 @@ export async function shareChat(chat: Chat) {
   await kv.hmset(`chat:${chat.id}`, payload)
 
   return payload
+}
+
+export async function saveChat(chat: Chat) {
+  const session = await auth()
+
+  if (session && session.user) {
+    const pipeline = kv.pipeline()
+    pipeline.hmset(`chat:${chat.id}`, chat)
+    pipeline.zadd(`user:chat:${chat.userId}`, {
+      score: Date.now(),
+      member: `chat:${chat.id}`
+    })
+    await pipeline.exec()
+  } else {
+    return
+  }
+}
+
+export async function refreshHistory(path: string) {
+  redirect(path)
+}
+
+export async function getMissingKeys() {
+  const keysRequired = ['OPENAI_API_KEY']
+  return keysRequired
+    .map(key => (process.env[key] ? '' : key))
+    .filter(key => key !== '')
 }
